@@ -918,75 +918,80 @@
         $('#addNewProductToTable').on('click', function () {
             const selectedProductData = $('#productToAddSelect').select2('data');
 
-            if (selectedProductData && selectedProductData.length > 0 && selectedProductData[0].product) {
-                const productToAdd = selectedProductData[0].product;
-                const quantityToAdd = parseFloat($('#quantityToAdd').val());
-
-                if (isNaN(quantityToAdd) || quantityToAdd <= 0) {
-                    Swal.fire({
-                        icon: 'warning',
-                        title: 'Lỗi số lượng!',
-                        text: 'Số lượng thêm vào phải là một số dương lớn hơn 0.'
-                    });
-                    $('#quantityToAdd').focus().select();
-                    return;
-                }
-
-                const existingProductIdsInTable = [];
-                $('.invoice-item-row').each(function () {
-                    const maspInRow = $(this).find('.masp-hidden').val();
-                    if (maspInRow) {
-                        existingProductIdsInTable.push(maspInRow);
-                    }
-                });
-
-                if (existingProductIdsInTable.includes(String(productToAdd.masp))) {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'Sản phẩm đã tồn tại!',
-                        text: 'Sản phẩm này đã có trong danh sách chi tiết hóa đơn. Vui lòng tăng số lượng nếu bạn muốn thêm nữa.'
-                    });
-                    // Vẫn cần reset và focus ở đây nếu sản phẩm đã tồn tại
-                    $('#productToAddSelect').val(null).trigger('change');
-                    $('#quantityToAdd').val('0'); // Reset số lượng về 0
-                    // Quan trọng: Focus vào ô tìm kiếm sản phẩm
-                    // Sử dụng setTimeout để Select2 có đủ thời gian xử lý trigger('change')
-                    setTimeout(() => {
-                        $('#productToAddSelect').select2('open'); // Mở Select2 để sẵn sàng gõ
-                    }, 50);
-                    selectedProductFromSelect2 = null;
-                    return;
-                }
-
-                console.log("Adding new row with product:", productToAdd, "and quantity:", quantityToAdd);
-                addInvoiceItemRow(productToAdd, quantityToAdd);
-
-                updateItemSTT();
-                calculateInvoiceTotals();
-                $('#productToAddSelect').val(null).trigger('change');
-                // 2. Reset ô số lượng về 0
-                $('#quantityToAdd').val('0');
-                setTimeout(() => {
-                    $('#productToAddSelect').select2('open');
-                }, 50);
-                // --- KẾT THÚC CÁC DÒNG QUAN TRỌNG ---
-
-                selectedProductFromSelect2 = null; // Reset biến global
-
-                isFormDirty = checkFormDirty();
-                console.log("Form dirty (after addNewProductToTable click):", isFormDirty);
-
-            } else {
+            // 1. Kiểm tra xem đã chọn sản phẩm chưa
+            if (!selectedProductData || selectedProductData.length === 0 || !selectedProductData[0].product) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Chưa chọn sản phẩm!',
                     text: 'Vui lòng chọn một sản phẩm từ danh sách trước khi thêm.'
                 });
-                // Nếu chưa chọn sản phẩm, vẫn muốn quay lại ô tìm kiếm
                 setTimeout(() => {
                     $('#productToAddSelect').select2('open');
                 }, 50);
+                return;
             }
+
+            const productToAdd = selectedProductData[0].product;
+            const quantityToAdd = parseFloat($('#quantityToAdd').val());
+
+            // 2. Kiểm tra số lượng hợp lệ
+            if (isNaN(quantityToAdd) || quantityToAdd <= 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Lỗi số lượng!',
+                    text: 'Số lượng thêm vào phải là một số dương lớn hơn 0.'
+                });
+                $('#quantityToAdd').focus().select();
+                return;
+            }
+
+            // 3. TÌM SẢN PHẨM TRÙNG TRONG BẢNG CHI TIẾT
+            let existingRow = null;
+            $('.invoice-item-row').each(function () {
+                const maspInRow = $(this).find('.masp-hidden').val();
+                if (maspInRow && maspInRow === String(productToAdd.masp)) {
+                    existingRow = $(this);
+                    return false; // Dừng vòng lặp .each()
+                }
+            });
+
+            // 4. XỬ LÝ KHI TÌM THẤY HOẶC KHÔNG TÌM THẤY
+            if (existingRow) {
+                // SẢN PHẨM ĐÃ TỒN TẠI: Cập nhật số lượng
+                const existingQuantityInput = existingRow.find('.quantity');
+                const existingQuantity = parseFormattedNumber(existingQuantityInput.val());
+                const newQuantity = existingQuantity + quantityToAdd;
+                
+                existingQuantityInput.val(formatNumber(newQuantity));
+
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Đã cập nhật số lượng!',
+                    text: `Sản phẩm "${productToAdd.tensp}" đã có trong hóa đơn. Đã cộng thêm ${quantityToAdd} vào số lượng.`
+                });
+
+                // Cần kích hoạt sự kiện input trên ô số lượng để tính toán lại thành tiền
+                existingQuantityInput.trigger('input');
+
+            } else {
+                // SẢN PHẨM CHƯA TỒN TẠI: Thêm dòng mới như bình thường
+                console.log("Adding new row with product:", productToAdd, "and quantity:", quantityToAdd);
+                addInvoiceItemRow(productToAdd, quantityToAdd);
+            }
+
+            // 5. CÁC HÀNH ĐỘNG SAU KHI THÊM HOẶC CẬP NHẬT
+            updateItemSTT();
+            calculateInvoiceTotals();
+            
+            // Dọn dẹp giao diện
+            $('#productToAddSelect').val(null).trigger('change');
+            $('#quantityToAdd').val('0');
+            setTimeout(() => {
+                $('#productToAddSelect').select2('open');
+            }, 50);
+            selectedProductFromSelect2 = null;
+            isFormDirty = checkFormDirty();
+            console.log("Form dirty (after addNewProductToTable click):", isFormDirty);
         });
 
         $('#ngaylap, #nguoilap, #ghichu').on('input', function () {
