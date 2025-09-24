@@ -316,3 +316,71 @@ def read_customers(
     customers = db.exec(query.offset(skip).limit(limit)).all()
 
     return {"customers": customers, "total_count": total_count}
+# 9. Endpoint GET /customers/{makh}/unsettled_invoices (Lấy danh sách hóa đơn còn nợ)
+@router.get("/{makh}/unsettled_invoices")
+def get_unsettled_invoices(makh: int, db: Session = Depends(get_session)):
+    """
+    Trả về danh sách các hóa đơn còn nợ của một khách hàng.
+    """
+    customer = db.exec(select(Customer).where(Customer.makh == makh)).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy khách hàng.")
+
+    invoices = db.exec(
+        select(Invoice)
+        .where(
+            Invoice.makh == makh,
+            Invoice.conno > 0
+        )
+    ).all()
+    
+    return invoices
+
+# 10. Endpoint POST /customers/{makh}/pay_invoices (Thanh toán các hóa đơn đã chọn)
+# Chú ý: Cần thêm Pydantic Model cho request body nếu muốn chuyên nghiệp hơn.
+@router.post("/{makh}/pay_invoices", status_code=status.HTTP_200_OK)
+def pay_selected_invoices(
+    makh: int, 
+    invoice_ids: List[str],
+    db: Session = Depends(get_session)
+):
+    """
+    Thanh toán các hóa đơn đã chọn của một khách hàng.
+    """
+    customer = db.exec(select(Customer).where(Customer.makh == makh)).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy khách hàng.")
+
+    if not invoice_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vui lòng chọn ít nhất một hóa đơn để thanh toán.")
+
+    # Sử dụng `select(Invoice).where(Invoice.mahd.in_(invoice_ids))` để tìm kiếm hiệu quả hơn
+    invoices_to_settle = db.exec(
+        select(Invoice)
+        .where(
+            Invoice.mahd.in_(invoice_ids),
+            Invoice.makh == makh,
+            Invoice.conno > 0
+        )
+    ).all()
+
+    if not invoices_to_settle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy hóa đơn nào hợp lệ để tất toán.")
+
+    total_settled_amount = 0
+    for invoice in invoices_to_settle:
+        total_settled_amount += invoice.conno
+        invoice.khhdathanhtoan += invoice.conno
+        invoice.conno = 0
+        db.add(invoice)
+    
+    customer.khhdathanhtoan += total_settled_amount
+    customer.conno -= total_settled_amount
+    db.add(customer)
+
+    db.commit()
+
+    return {
+        "message": f"Đã thanh toán thành công {len(invoices_to_settle)} hóa đơn.",
+        "total_amount": total_settled_amount
+    }
